@@ -39,11 +39,21 @@ class MessageDelete extends Event
         foreach ($discord->guilds as $index => $guild) {
             foreach ($guild->channels as $cindex => $channel) {
                 if ($channel->id == $data->channel_id) {
-                    $channel->messages->pull($data->id);
+                    foreach ($channel->messages as $mindex => $message) {
+                        if ($message->id == $data->id) {
+                            $channel->messages->pull($mindex);
+
+                            break;
+                        }
+                    }
+
+                    $guild->channels[$cindex] = $channel;
 
                     break;
                 }
             }
+
+            $discord->guilds[$index] = $guild;
         }
 
         return $discord;

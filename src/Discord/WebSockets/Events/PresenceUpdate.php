@@ -36,14 +36,18 @@ class PresenceUpdate extends Event
     {
         foreach ($discord->guilds as $index => $guild) {
             if ($guild->id == $data->guild_id) {
-                $member = @$guild->members[$data->user->id];
+                foreach ($guild->members as $mindex => $member) {
+                    if ($member->id == $data->user->id) {
+                        $member->game   = $data->game;
+                        $member->status = $data->status;
 
-                if (! is_null($member)) {
-                    $member->game   = $data->game;
-                    $member->status = $data->status;
+                        $guild->members[$mindex] = $member;
 
-                    $guild->members[$data->user->id] = $member;
+                        break;
+                    }
                 }
+
+                $discord->guilds[$index] = $guild;
 
                 break;
             }

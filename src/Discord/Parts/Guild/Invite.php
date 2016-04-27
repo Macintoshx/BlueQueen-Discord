@@ -15,23 +15,10 @@ use Carbon\Carbon;
 use Discord\Helpers\Guzzle;
 use Discord\Parts\Channel\Channel;
 use Discord\Parts\Part;
-use Discord\Parts\User\Member;
 use Discord\Parts\User\User;
 
 /**
  * An invite to a Channel and Guild.
- *
- * @property string  $code
- * @property int     $max_age
- * @property Guild   $guild
- * @property bool    $revoked
- * @property Carbon  $created_at
- * @property bool    $temporary
- * @property int     $uses
- * @property int     $max_uses
- * @property Member  $inviter
- * @property bool    $xkcdpass
- * @property Channel $channel
  */
 class Invite extends Part
 {
@@ -43,19 +30,7 @@ class Invite extends Part
     /**
      * {@inheritdoc}
      */
-    protected $fillable = [
-        'code',
-        'max_age',
-        'guild',
-        'revoked',
-        'created_at',
-        'temporary',
-        'uses',
-        'max_uses',
-        'inviter',
-        'xkcdpass',
-        'channel',
-    ];
+    protected $fillable = ['code', 'max_age', 'guild', 'revoked', 'created_at', 'temporary', 'uses', 'max_uses', 'inviter', 'xkcdpass', 'channel'];
 
     /**
      * {@inheritdoc}
@@ -67,11 +42,11 @@ class Invite extends Part
     ];
 
     /**
-     * Accepts the invite.
+     * Uses the invite.
      *
-     * @return bool Whether the accept succeeded.
+     * @return bool Whether the use succeeded.
      */
-    public function accept()
+    public function use ()
     {
         if ($this->revoked) {
             return false;

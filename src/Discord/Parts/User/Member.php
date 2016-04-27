@@ -25,15 +25,6 @@ use Discord\Parts\Permissions\RolePermission as Permission;
 
 /**
  * A member is a relationship between a user and a guild. It contains user-to-guild specific data like roles.
- *
- * @property User         $user
- * @property array|Role[] $roles
- * @property bool         $deaf
- * @property bool         $mute
- * @property Carbon       $joined_at
- * @property string       $guild_id
- * @property string       $status
- * @property string       $game
  */
 class Member extends Part
 {
@@ -100,12 +91,10 @@ class Member extends Part
             return false;
         }
 
-        return new Ban(
-            [
-                'user'  => $this->user,
-                'guild' => new Guild(['id' => $this->guild_id], true),
-            ], true
-        );
+        return new Ban([
+            'user'  => $this->user,
+            'guild' => new Guild(['id' => $this->guild_id], true),
+        ], true);
     }
 
     /**
@@ -121,12 +110,9 @@ class Member extends Part
             $channel = $channel->id;
         }
 
-        Guzzle::patch(
-            "guilds/{$this->guild_id}/members/{$this->id}",
-            [
-                'channel_id' => $channel,
-            ]
-        );
+        Guzzle::patch("guilds/{$this->guild_id}/members/{$this->id}", [
+            'channel_id' => $channel,
+        ]);
 
         // At the moment we are unable to check if the member
         // was moved successfully.
@@ -156,7 +142,7 @@ class Member extends Part
         $this->getRolesAttribute();
 
         $this->attributes['roles'][] = $role->id;
-        $this->roles->push($role);
+        $this->attributes_cache['roles']->push($role);
 
         return true;
     }
@@ -224,39 +210,29 @@ class Member extends Part
      */
     public function getRolesAttribute()
     {
-        if ($roles = Cache::get("guild.{$this->guild_id}.members.{$this->id}.roles")) {
-            return $roles;
+        if (isset($this->attributes_cache['roles'])) {
+            return $this->attributes_cache['roles'];
         }
 
-        $roles = [];
+        $roles   = [];
+        $request = Guzzle::get($this->replaceWithVariables('guilds/:guild_id/roles'));
 
-        if ($guildRoles = Cache::get("guild.{$this->guild_id}.roles")) {
-            foreach ($guildRoles as $role) {
-                if (false !== array_search($role->id, (array) $this->attributes['roles'])) {
-                    $roles[] = $role;
-                }
-            }
-        } else {
-            $request = Guzzle::get($this->replaceWithVariables('guilds/:guild_id/roles'));
-
-            foreach ($request as $key => $role) {
-                if (false !== array_search($role->id, (array) $this->attributes['roles'])) {
-                    $perm                = new Permission(
-                        [
-                            'perms' => $role->permissions,
-                        ]
-                    );
-                    $role                = (array) $role;
-                    $role['permissions'] = $perm;
-                    $role                = new Role($role, true);
-                    Cache::set("role.{$role->id}", $role);
-                    $roles[] = $role;
-                }
+        foreach ($request as $key => $role) {
+            if (! (false === array_search($role->id, (array) $this->attributes['roles']))) {
+                $perm = new Permission([
+                    'perms' => $role->permissions,
+                ]);
+                $role                = (array) $role;
+                $role['permissions'] = $perm;
+                $role                = new Role($role, true);
+                Cache::set("role.{$role->id}", $role);
+                $roles[] = $role;
             }
         }
 
         $roles = new Collection($roles);
-        $roles->setCacheKey("guild.{$this->guild_id}.members.{$this->id}.roles", true);
+
+        $this->attributes_cache['roles'] = $roles;
 
         return $roles;
     }

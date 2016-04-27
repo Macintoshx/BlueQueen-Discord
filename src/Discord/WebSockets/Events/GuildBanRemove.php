@@ -57,6 +57,8 @@ class GuildBanRemove extends Event
                     }
                 }
 
+                $discord->guilds[$index] = $guild;
+
                 break;
             }
         }

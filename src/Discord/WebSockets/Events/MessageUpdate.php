@@ -40,13 +40,21 @@ class MessageUpdate extends Event
         foreach ($discord->guilds as $index => $guild) {
             foreach ($guild->channels as $cindex => $channel) {
                 if ($channel->id == $data->channel_id) {
-                    $message = $channel->messages->pull($data->id);
+                    foreach ($channel->messages as $mindex => $message) {
+                        if ($message->id == $data->id) {
+                            $channel->messages->pull($mindex);
 
-                    if (! isset($data->content)) {
-                        $channel->messages->push(new Message(array_merge((array) $message, (array) $data), true));
-                    } else {
-                        $channel->messages->push($data);
+                            if (! isset($data->content)) {
+                                $channel->messages->push(new Message(array_merge((array) $message, (array) $data), true));
+                            } else {
+                                $channel->messages->push($data);
+                            }
+
+                            break;
+                        }
                     }
+
+                    $guild->channels[$cindex] = $channel;
 
                     break;
                 }

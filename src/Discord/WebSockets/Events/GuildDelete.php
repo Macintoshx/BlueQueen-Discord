@@ -27,10 +27,6 @@ class GuildDelete extends Event
      */
     public function getData($data, $discord)
     {
-        if (isset($data->unavailable) && $data->unavailable) {
-            $this->emit('unavailable', [$data->id]);
-        }
-
         $guildPart = new Guild((array) $data, true);
 
         return $guildPart;

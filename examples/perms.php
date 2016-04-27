@@ -18,13 +18,13 @@ use Discord\WebSockets\WebSocket;
 // Includes the Composer autoload file
 include '../vendor/autoload.php';
 
-if ($argc != 2) {
-    echo 'You must pass your Token into the cmdline. Example: php perms.php <token>';
+if ($argc < 3) {
+    echo 'You must pass your Email and Password into the cmdline. Example: php perms.php <email> <password>';
     die(1);
 }
 
 // Init the Discord instance.
-$discord = new Discord(['token' => $argv[1]]);
+$discord = new Discord($argv[1], $argv[2]);
 // Init the WebSocket instance.
 $ws = new WebSocket($discord);
 

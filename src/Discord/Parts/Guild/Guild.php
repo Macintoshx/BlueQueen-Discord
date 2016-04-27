@@ -23,77 +23,29 @@ use Discord\Parts\User\User;
 
 /**
  * A Guild is Discord's equivalent of a server. It contains all the Members, Channels, Roles, Bans etc.
- *
- * @property string       $id
- * @property string       $name
- * @property string       $icon
- * @property string       $region
- * @property string       $owner_id
- * @property array|Role[] $roles
- * @property \DateTime    $joined_at
- * @property string       $afk_channel_id
- * @property int          $afk_timeout
- * @property bool         $embed_enabled
- * @property string       $embed_channel_id
- * @property array        $features
- * @property string       $splash
- * @property array        $emojis
- * @property bool         $large
- * @property int          $verification_level
- * @property int          $member_count
  */
 class Guild extends Part
 {
     const REGION_DEFAULT    = self::REGION_US_WEST;
-
     const REGION_US_WEST    = 'us-west';
-
     const REGION_US_SOUTH   = 'us-south';
-
     const REGION_US_EAST    = 'us-east';
-
     const REGION_US_CENTRAL = 'us-central';
-
     const REGION_SINGAPORE  = 'singapore';
-
     const REGION_LONDON     = 'london';
-
     const REGION_SYDNEY     = 'sydney';
-
     const REGION_FRANKFURT  = 'frankfurt';
-
     const REGION_AMSTERDAM  = 'amsterdam';
 
-    const LEVEL_OFF         = 0;
-
-    const LEVEL_LOW         = 1;
-
-    const LEVEL_MEDIUM      = 2;
-
-    const LEVEL_TABLEFLIP   = 3;
+    const LEVEL_OFF       = 0;
+    const LEVEL_LOW       = 1;
+    const LEVEL_MEDIUM    = 2;
+    const LEVEL_TABLEFLIP = 3;
 
     /**
      * {@inheritdoc}
      */
-    protected $fillable = [
-        'id',
-        'name',
-        'icon',
-        'region',
-        'owner_id',
-        'roles',
-        'joined_at',
-        'afk_channel_id',
-        'afk_timeout',
-        'embed_enabled',
-        'embed_channel_id',
-        'features',
-        'splash',
-        'emojis',
-        'large',
-        'verification_level',
-        'member_count',
-    ];
+    protected $fillable = ['id', 'name', 'icon', 'region', 'owner_id', 'roles', 'joined_at', 'afk_channel_id', 'afk_timeout', 'embed_enabled', 'embed_channel_id', 'features', 'splash', 'emojis', 'large', 'verification_level'];
 
     /**
      * {@inheritdoc}
@@ -161,12 +113,9 @@ class Guild extends Part
         }
 
         try {
-            $request = Guzzle::patch(
-                $this->replaceWithVariables('guilds/:id'),
-                [
-                    'owner_id' => $member,
-                ]
-            );
+            $request = Guzzle::patch($this->replaceWithVariables('guilds/:id'), [
+                'owner_id' => $member,
+            ]);
 
             if ($request->owner_id != $member) {
                 return false;
@@ -187,15 +136,15 @@ class Guild extends Part
      */
     public function getMembersAttribute()
     {
-        if ($members = Cache::get("guild.{$this->id}.members")) {
-            return $members;
+        if (isset($this->attributes_cache['members'])) {
+            return $this->attributes_cache['members'];
         }
 
         // Members aren't retrievable via REST anymore,
         // they will be set if the websocket is used.
-        Cache::set("guild.{$this->id}.members", new Collection([], "guild.{$this->id}.members"));
+        $this->attributes_cache = new Collection();
 
-        return Cache::get("guild.{$this->id}.members");
+        return $this->attributes_cache['members'];
     }
 
     /**
@@ -209,10 +158,6 @@ class Guild extends Part
             return $this->attributes_cache['roles'];
         }
 
-        if ($roles = Cache::get("guild.{$this->id}.roles")) {
-            return $roles;
-        }
-
         $roles = [];
 
         foreach ($this->attributes['roles'] as $index => $role) {
@@ -224,9 +169,9 @@ class Guild extends Part
             $roles[$index]       = new Role($role, true);
         }
 
-        $roles = new Collection($roles, "guild.{$this->id}.roles");
+        $roles = new Collection($roles);
 
-        Cache::set("guild.{$this->id}.roles", $roles);
+        $this->attributes_cache['roles'] = $roles;
 
         return $roles;
     }
@@ -242,11 +187,17 @@ class Guild extends Part
             return $owner;
         }
 
+        if (isset($this->attributes_cache['owner'])) {
+            return $this->attributes_cache['owner'];
+        }
+
         $request = Guzzle::get($this->replaceWithVariables('users/:owner_id'));
 
         $owner = new User((array) $request, true);
 
-        Cache::set("user.{$owner->id}", $owner);
+        Cache::set("user.{$user->id}", $owner);
+
+        $this->attributes_cache['owner'] = $owner;
 
         return $owner;
     }
@@ -258,8 +209,8 @@ class Guild extends Part
      */
     public function getChannelsAttribute()
     {
-        if ($channels = Cache::get("guild.{$this->id}.channels")) {
-            return $channels;
+        if (isset($this->attributes_cache['channels'])) {
+            return $this->attributes_cache['channels'];
         }
 
         $channels = [];
@@ -271,9 +222,9 @@ class Guild extends Part
             $channels[$index] = $channel;
         }
 
-        $channels = new Collection($channels, "guild.{$this->id}.channels");
+        $channels = new Collection($channels);
 
-        Cache::set("guild.{$this->id}.channels", $channels);
+        $this->attributes_cache['channels'] = $channels;
 
         return $channels;
     }
@@ -285,8 +236,8 @@ class Guild extends Part
      */
     public function getBansAttribute()
     {
-        if ($bans = Cache::get("guild.{$this->id}.bans")) {
-            return $bans;
+        if (isset($this->attributes_cache['bans'])) {
+            return $this->attributes_cache['bans'];
         }
 
         $bans = [];
@@ -305,9 +256,9 @@ class Guild extends Part
             $bans[$index] = $ban;
         }
 
-        $bans = new Collection($bans, "guild.{$this->id}.bans");
+        $bans = new Collection($bans);
 
-        Cache::set("guild.{$this->id}.bans", $bans);
+        $this->attributes_cache['bans'] = $bans;
 
         return $bans;
     }
@@ -323,10 +274,6 @@ class Guild extends Part
             return $this->attributes_cache['invites'];
         }
 
-        if ($invites = Cache::get("guild.{$this->id}.invites")) {
-            return $invites;
-        }
-
         $request = Guzzle::get($this->replaceWithVariables('guilds/:id/invites'));
         $invites = [];
 
@@ -336,9 +283,9 @@ class Guild extends Part
             $invites[$index] = $invite;
         }
 
-        $invites = new Collection($invites, "guild.{$this->id}.invites");
+        $invites = new Collection($invites);
 
-        Cache::set("guild.{$this->id}.invites", $invites);
+        $this->attributes_cache['invites'] = $invites;
 
         return $invites;
     }
@@ -405,14 +352,6 @@ class Guild extends Part
         }
 
         return $this->region;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function setCache($key, $value)
-    {
-        Cache::set("guild.{$this->id}.{$key}", $value);
     }
 
     /**

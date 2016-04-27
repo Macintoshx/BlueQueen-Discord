@@ -191,7 +191,7 @@ class RecieveStream extends EventEmitter implements DuplexStreamInterface
     /**
      * {@inheritdoc}
      */
-    public function resume()
+    public function unpause()
     {
         if ($this->isClosed) {
             return;
@@ -201,15 +201,15 @@ class RecieveStream extends EventEmitter implements DuplexStreamInterface
             return;
         }
 
-        $this->isPaused = false;
-
         foreach ($this->pcmPauseBuffer as $data) {
-            $this->writePCM($data);
+            $this->emit('pcm', [$data]);
         }
 
         foreach ($this->opusPauseBuffer as $data) {
-            $this->writeOpus($data);
+            $this->emit('opus', [$data]);
         }
+
+        $this->isPaused = false;
     }
 
     /**

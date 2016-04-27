@@ -16,7 +16,6 @@ use Discord\Helpers\Collection;
 use Discord\Parts\Channel\Channel;
 use Discord\Parts\Guild\Guild;
 use Discord\Parts\User\Member;
-use Discord\Parts\WebSockets\VoiceStateUpdate;
 use Discord\WebSockets\Event;
 
 /**
@@ -31,10 +30,6 @@ class GuildCreate extends Event
      */
     public function getData($data, $discord)
     {
-        if (isset($data->unavailable) && $data->unavailable) {
-            $this->emit('unavailable', [$data->id]);
-        }
-
         $guildPart = new Guild((array) $data, true);
 
         $channels = new Collection();
@@ -77,20 +72,10 @@ class GuildCreate extends Event
 
             Cache::set("guild.{$guildPart->id}.members.{$memberPart->id}", $memberPart);
 
-            $members[$memberPart->id] = $memberPart;
+            $members[$guildPart->id] = $memberPart;
         }
 
         $guildPart->setCache('members', $members);
-
-        foreach ($data->voice_states as $state) {
-            if ($channel = $guildPart->channels->get('id', $state->channel_id)) {
-                $channel->members[$state->user_id] = new VoiceStateUpdate((array) $state, true);
-            }
-        }
-
-        if ($guildPart->large) {
-            $this->emit('large', [$guildPart]);
-        }
 
         return $guildPart;
     }

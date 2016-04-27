@@ -153,7 +153,6 @@ class Process extends EventEmitter
             $this->closeExitCodePipe();
         }
 
-        $this->terminate();
         $exitCode      = proc_close($this->process);
         $this->process = null;
 

@@ -18,11 +18,6 @@ use Discord\Parts\Part;
 
 /**
  * A user is a general user that is not attached to a guild.
- *
- * @property string $id
- * @property string $username
- * @property string $avatar
- * @property string $discriminator
  */
 class User extends Part
 {
@@ -63,27 +58,21 @@ class User extends Part
      */
     public function sendMessage($message, $tts = false)
     {
-        if ($channelID = Cache::get("user.{$this->id}.pm")) {
-            $channel_id = $channelID;
+        if (isset($this->attributes_cache['channel_id'])) {
+            $channel_id = $this->attributes_cache['channel_id'];
         } else {
-            $channel = Guzzle::post(
-                'users/@me/channels',
-                [
-                    'recipient_id' => $this->id,
-                ]
-            );
+            $channel = Guzzle::post('users/@me/channels', [
+                'recipient_id' => $this->id,
+            ]);
 
-            $channel_id = $channel->id;
-            Cache::set("user.{$this->id}.pm", $channel->id);
+            $channel_id                           = $channel->id;
+            $this->attributes_cache['channel_id'] = $channel->id;
         }
 
-        $request = Guzzle::post(
-            "channels/{$channel_id}/messages",
-            [
-                'content' => $message,
-                'tts'     => $tts,
-            ]
-        );
+        $request = Guzzle::post("channels/{$channel_id}/messages", [
+            'content' => $message,
+            'tts'     => $tts,
+        ]);
 
         $message = new Message((array) $request, true);
 
@@ -99,18 +88,15 @@ class User extends Part
      */
     public function broadcastTyping()
     {
-        if ($channelID = Cache::get("user.{$this->id}.pm")) {
-            $channel_id = $channelID;
+        if (isset($this->attributes_cache['channel_id'])) {
+            $channel_id = $this->attributes_cache['channel_id'];
         } else {
-            $channel = Guzzle::post(
-                'users/@me/channels',
-                [
-                    'recipient_id' => $this->id,
-                ]
-            );
+            $channel = Guzzle::post('users/@me/channels', [
+                'recipient_id' => $this->id,
+            ]);
 
-            $channel_id = $channel->id;
-            Cache::set("user.{$this->id}.pm", $channel->id);
+            $channel_id                           = $channel->id;
+            $this->attributes_cache['channel_id'] = $channel->id;
         }
 
         Guzzle::post("channels/{$channel_id}/typing");

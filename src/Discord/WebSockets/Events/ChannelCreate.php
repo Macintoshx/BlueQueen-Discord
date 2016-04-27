@@ -41,6 +41,8 @@ class ChannelCreate extends Event
             if ($guild->id == $data->guild_id) {
                 $guild->channels->push($data);
 
+                $discord->guilds[$index] = $guild;
+
                 break;
             }
         }

@@ -13,10 +13,8 @@ namespace Discord\Helpers;
 
 use Discord\Cache\Cache;
 use Discord\Discord;
-use Discord\Exceptions\Rest\ContentTooLongException;
+use Discord\Exceptions\ContentTooLongException;
 use Discord\Exceptions\DiscordRequestFailedException;
-use Discord\Exceptions\Rest\NoPermissionsException;
-use Discord\Exceptions\Rest\NotFoundException;
 use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\Psr7\Request;
 use Illuminate\Support\Str;
@@ -39,6 +37,13 @@ class Guzzle
      * @var int Length of time to cache requests.
      */
     public static $cacheTtl = 300;
+
+    /**
+     * The options to set in the Guzzle client.
+     *
+     * @var array
+     */
+    private static $guzzleOptions = ['http_errors' => false, 'allow_redirects' => true];
 
     /**
      * Handles dynamic calls to the class.
@@ -74,7 +79,7 @@ class Guzzle
      */
     public static function runRequest($method, $url, $content, $auth, $extraHeaders)
     {
-        $guzzle    = new GuzzleClient(['http_errors' => false, 'allow_redirects' => true]);
+        $guzzle    = new GuzzleClient(self::$guzzleOptions);
         $query_url = self::$base_url."/{$url}";
 
         if (Cache::has("guzzle:{$query_url}") && (strtolower($method) == 'get')) {
@@ -160,9 +165,7 @@ class Guzzle
      * @param string $url        The HTTP url.
      *
      * @throws \Discord\Exceptions\DiscordRequestFailedException Thrown when the request fails.
-     * @throws \Discord\Exceptions\Rest\ContentTooLongException  Thrown when the content is longer than 2000 characters.
-     * @throws \Discord\Exceptions\Rest\NotFoundException        Thrown when the server returns 404 Not Found.
-     * @throws \Discord\Exceptions\Rest\NoPermissionsException   Thrown when you do not have permissions to do something.
+     * @throws \Discord\Exceptions\ContentTooLongException       Thrown when the content is longer than 2000 characters.
      */
     public static function handleError($error_code, $message, $content, $url)
     {
@@ -188,21 +191,23 @@ class Guzzle
 
         switch ($error_code) {
             case 404:
-                throw new NotFoundException("Error code 404: This resource does not exist. {$message}");
+                $response = "Error code 404: This resource does not exist. {$message}";
                 break;
             case 400:
-                throw new DiscordRequestFailedException("Error code 400: We sent a bad request. {$message}");
+                $response = "Error code 400: This usually means you have entered an incorrect Email or Password. {$message}";
                 break;
             case 500:
-                throw new DiscordRequestFailedException("Error code 500: This usually means something went wrong with Discord. {$message}");
+                $response = "Error code 500: This usually means something went wrong with Discord. {$message}";
                 break;
             case 403:
-                throw new NoPermissionsException("Erorr code 403: You do not have permission to do this. {$message}");
+                $response = "Erorr code 403: You do not have permission to do this. {$message}";
                 break;
             default:
-                throw new DiscordRequestFailedException("Erorr code {$error_code}: There was an error processing the request. {$message}");
+                $response = "Erorr code {$error_code}: There was an error processing the request. {$message}";
                 break;
         }
+
+        throw new DiscordRequestFailedException($response);
     }
 
     /**
@@ -213,5 +218,15 @@ class Guzzle
     public static function getUserAgent()
     {
         return 'DiscordPHP/'.Discord::VERSION.' DiscordBot (https://github.com/teamreflex/DiscordPHP, '.Discord::VERSION.')';
+    }
+
+    /**
+     * Merges the given options with the current options.
+     *
+     * @param array $options The options to be set/updated
+     */
+    public static function addGuzzleOptions(array $options)
+    {
+        self::$guzzleOptions = array_merge(self::$guzzleOptions, $options);
     }
 }
