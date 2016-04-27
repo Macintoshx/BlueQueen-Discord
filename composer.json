@@ -1,0 +1,40 @@
+{
+    "name":        "team-reflex/discord-php",
+    "description": "An unofficial API to interact with the voice and text service Discord.",
+    "license":     "MIT",
+    "authors":     [
+        {
+            "name":  "David Cole",
+            "email": "david@team-reflex.com"
+        }
+    ],
+    "require":     {
+        "cache/cache":              "^0.1",
+        "guzzlehttp/guzzle":        "~5.3|~6.0",
+        "illuminate/support":       "^5.1",
+        "nesbot/carbon":            "^1.21",
+        "ratchet/pawl":             "0.2.*",
+        "react/datagram":           "1.1.*",
+        "react/socket-client":      "0.4.*",
+        "symfony/options-resolver": "^2.7|^3.0",
+        "TrafficCophp/ByteBuffer":  "dev-master"
+    },
+    "require-dev": {
+        "symfony/var-dumper": "^2.7|^3.0",
+        "phpunit/phpunit":    "^5.1|^6.0"
+    },
+    "autoload":    {
+        "psr-4": {
+            "Discord\\": "src/Discord"
+        },
+        "files": [
+            "src/Discord/Helpers/Erlang.php"
+        ]
+    },
+    "suggest":     {
+        "predis/predis": "Required to use the Redis cache driver."
+    },
+    "scripts":     {
+        "test": "php tests/run.php"
+    }
+}
