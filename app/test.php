@@ -74,4 +74,14 @@ $ws->on(
 );
 
 // Now we will run the ReactPHP Event Loop!
-$ws->run();
+while(true)
+{
+	try{
+		$ws->run();
+	}
+	catch(Exception $e)
+	{
+		echo "Error occured - restart";
+	}
+
+}
