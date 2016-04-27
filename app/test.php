@@ -49,6 +49,11 @@ $ws->on(
                     $message->reply('pong!');
                 }
 
+	            if($message->content == '!pogoda')
+	            {
+		            $message->reply('funkcja jeszcze nie dostepna');
+	            }
+
                 $reply = $message->timestamp->format('d/m/y H:i:s').' - '; // Format the message timestamp.
                 $reply .= $message->full_channel->guild->name.' - ';
                 $reply .= $message->author->username.' - '; // Add the message author's username onto the string.
