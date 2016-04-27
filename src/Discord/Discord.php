@@ -12,11 +12,10 @@
 namespace Discord;
 
 use Carbon\Carbon;
-use Discord\Exceptions\InviteInvalidException;
 use Discord\Helpers\Guzzle;
-use Discord\Parts\Guild\Invite;
 use Discord\Parts\Part;
 use Discord\Parts\User\Client;
+use Symfony\Component\OptionsResolver\OptionsResolver;
 
 /**
  * The Discord class is the base of the client. This is the class that you
@@ -31,7 +30,7 @@ class Discord
      *
      * @var string The current version of the API.
      */
-    const VERSION = 'v3.2.0';
+    const VERSION = 'v3.2.0-beta';
 
     /**
      * The Discord epoch value.
@@ -50,123 +49,34 @@ class Discord
     /**
      * Logs into the Discord servers.
      *
-     * @param string $email    The Email for the account you are logging into.
-     * @param string $password The password for the account you are logging into.
-     * @param string $token    The account's token (optional)
-     *
-     * @return void
+     * @param string|array $options Either a token, or Options for the bot
      */
-    public function __construct($email = null, $password = null, $token = null)
+    public function __construct($options)
     {
-        $this->setToken($email, $password, $token);
+        $options = ! is_array($options) ? ['token' => $options] : $options;
+        $options = $this->resolveOptions($options);
 
-        $request = Guzzle::get('users/@me');
+        define('DISCORD_TOKEN', $options['token']);
 
-        $this->client = new Client((array) $request, true);
+        $this->client = new Client((array) Guzzle::get('users/@me'), true);
     }
 
     /**
-     * Check the filesystem for the token.
+     * @param array $options
      *
-     * @param string $email The Email that will be checked for token caching
-     *
-     * @return string|null The Discord token or null.
+     * @return array
+     * @throws \Exception
      */
-    protected function checkForCaching($email)
+    private function resolveOptions(array $options)
     {
-        if (file_exists(getcwd().'/discord/'.md5($email))) {
-            $file = file_get_contents(getcwd().'/discord/'.md5($email));
+        $resolver = new OptionsResolver();
+        $resolver
+            ->setRequired('token')
+            ->setAllowedTypes('token', 'string');
 
-            return $file;
-        }
-    }
+        $result = $resolver->resolve($options);
 
-    /**
-     * Sets the token for the API.
-     *
-     * @param string $email    The Email for the account you are logging into.
-     * @param string $password The password for the account you are logging into.
-     * @param string $token    The account's token (optional)
-     *
-     * @return void
-     */
-    protected function setToken($email, $password, $token)
-    {
-        if (! is_null($token)) {
-            @define('DISCORD_TOKEN', $token);
-
-            return;
-        }
-
-        if (! is_null($token = $this->checkForCaching($email))) {
-            @define('DISCORD_TOKEN', $token);
-
-            return;
-        }
-
-        $request = Guzzle::post('auth/login', [
-            'email'    => $email,
-            'password' => $password,
-        ], true);
-
-        try {
-            if (! file_exists(getcwd().'/discord')) {
-                mkdir(getcwd().'/discord');
-            }
-
-            file_put_contents(getcwd().'/discord/'.md5($email), $request->token);
-        } catch (\Exception $e) {
-        }
-
-        @define('DISCORD_TOKEN', $request->token);
-
-        return;
-    }
-
-    /**
-     * Logs out of Discord.
-     *
-     * @return bool Whether the login succeeded or failed.
-     */
-    public function logout()
-    {
-        $request = Guzzle::post('auth/logout', [
-            'token' => DISCORD_TOKEN,
-        ]);
-
-        $this->client = null;
-
-        return true;
-    }
-
-    /**
-     * Accepts a Discord channel invite.
-     *
-     * @param string $code The invite code. (not including the URL)
-     *
-     * @return Invite The invite that was accepted, in \Discord\Parts\Guild\Invite format.
-     *
-     * @throws InviteInvalidException Thrown when the invite is invalid or not found.
-     *
-     * @see \Discord\Parts\Guild\Invite The type that the invite is returned in.
-     */
-    public function acceptInvite($code)
-    {
-        if ($code instanceof Invite) {
-            $code = $invite->code;
-        }
-
-        if (preg_match('/https:\/\/discord.gg\/(.+)/', $code, $matches)) {
-            $code = $matches[1];
-        }
-
-        try {
-            $request = Guzzle::post("invite/{$code}");
-        } catch (\Exception $e) {
-            throw new InviteInvalidException('The invite is invalid or has expired.');
-        }
-
-        return new Invite((array) $request, true);
+        return $result;
     }
 
     /**
@@ -192,20 +102,17 @@ class Discord
     }
 
     /**
-     * Creates a Discord OAuth application.
+     * Creates a Discord instance with a bot token.
      *
-     * @param string $token Your authentication token.
-     * @param string $name  Your OAuth app name.
+     * @param string $token The bot token.
+     *
+     * @return \Discord\Discord The Discord instance.
      */
-    public static function createOauthApp($token, $name)
+    public static function createWithBotToken($token)
     {
-        $response = Guzzle::post('oauth2/applications', [
-            'name' => $name,
-        ], true, [
-            'authorization' => $token,
-        ]);
+        $discord = new self($token);
 
-        return $response;
+        return $discord;
     }
 
     /**
@@ -252,5 +159,13 @@ class Discord
     public function __set($variable, $value)
     {
         $this->client->setAttribute($variable, $value);
+    }
+
+    /**
+     * @return Client
+     */
+    public function getClient()
+    {
+        return $this->client;
     }
 }

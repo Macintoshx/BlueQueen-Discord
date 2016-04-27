@@ -15,6 +15,7 @@ use Discord\Cache\Cache;
 use Discord\Exceptions\FileNotFoundException;
 use Discord\Helpers\Collection;
 use Discord\Helpers\Guzzle;
+use Discord\Parts\Channel\Message;
 use Discord\Parts\Guild\Guild;
 use Discord\Parts\Guild\Invite;
 use Discord\Parts\Guild\Role;
@@ -27,16 +28,44 @@ use GuzzleHttp\Psr7\Request;
 
 /**
  * A Channel can be either a text or voice channel on a Discord guild.
+ *
+ *
+ * @property string            $id
+ * @property string            $name
+ * @property string            $type
+ * @property string            $topic
+ * @property string            $guild_id
+ * @property int               $position
+ * @property bool              $is_private
+ * @property string            $last_message_id
+ * @property array|Overwrite[] $permission_overwrites
+ * @property array|Message[]   $messages
+ * @property int               $message_count
+ * @property int               $bitrate
  */
 class Channel extends Part
 {
     const TYPE_TEXT  = 'text';
+
     const TYPE_VOICE = 'voice';
 
     /**
      * {@inheritdoc}
      */
-    protected $fillable = ['id', 'name', 'type', 'topic', 'guild_id', 'position', 'is_private', 'last_message_id', 'permission_overwrites', 'messages', 'message_count', 'bitrate'];
+    protected $fillable = [
+        'id',
+        'name',
+        'type',
+        'topic',
+        'guild_id',
+        'position',
+        'is_private',
+        'last_message_id',
+        'permission_overwrites',
+        'messages',
+        'message_count',
+        'bitrate',
+    ];
 
     /**
      * {@inheritdoc}
@@ -98,28 +127,6 @@ class Channel extends Part
     }
 
     /**
-     * Removes a permission overwrite from the channel.
-     *
-     * @param Member|Role $part Either a Member or Role, permissions that will be deleted.
-     *
-     * @return bool Whether the function succeeded or failed.
-     */
-    public function removePermissions($part)
-    {
-        if (! ($part instanceof Member) && ! ($part instanceof Role)) {
-            return false;
-        }
-
-        try {
-            Guzzle::delete("channels/{$this->id}/permissions/{$part->id}");
-        } catch (\Exception $e) {
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
      * Moves a member to another voice channel.
      *
      * @param Member|int The member to move. (either a Member part or the member ID)
@@ -136,9 +143,12 @@ class Channel extends Part
             $member = $member->id;
         }
 
-        Guzzle::patch("guilds/{$this->guild_id}/members/{$member}", [
-            'channel_id' => $this->id,
-        ]);
+        Guzzle::patch(
+            "guilds/{$this->guild_id}/members/{$member}",
+            [
+                'channel_id' => $this->id,
+            ]
+        );
 
         // At the moment we are unable to check if the member
         // was moved successfully.
@@ -153,11 +163,11 @@ class Channel extends Part
      */
     public function getMembersAttribute()
     {
-        if ($members = Cache::get("channels.{$this->id}.voice.members")) {
-            return $members;
+        if (! Cache::has("channel.{$this->id}.voice.members")) {
+            Cache::set("channel.{$this->id}.voice.members", new Collection([], "channel.{$this->id}.voice.members"));
         }
 
-        return new Collection();
+        return Cache::get("channel.{$this->id}.voice.members");
     }
 
     /**
@@ -167,16 +177,12 @@ class Channel extends Part
      */
     public function getGuildAttribute()
     {
-        if ($guild = Cache::get("guild.{$this->guild_id}")) {
-            return $guild;
-        }
-
-        if (isset($this->attributes_cache['guild'])) {
-            return $this->attributes_cache['guild'];
-        }
-
         if (is_null($this->guild_id)) {
             return;
+        }
+
+        if ($guild = Cache::get("guild.{$this->guild_id}")) {
+            return $guild;
         }
 
         $request = Guzzle::get("guilds/{$this->guild_id}");
@@ -201,14 +207,17 @@ class Channel extends Part
      */
     public function createInvite($max_age = 3600, $max_uses = 0, $temporary = false, $xkcd = false)
     {
-        $request = Guzzle::post($this->replaceWithVariables('channels/:id/invites'), [
-            'validate' => null,
+        $request = Guzzle::post(
+            $this->replaceWithVariables('channels/:id/invites'),
+            [
+                'validate' => null,
 
-            'max_age'   => $max_age,
-            'max_uses'  => $max_uses,
-            'temporary' => $temporary,
-            'xkcdpass'  => $xkcd,
-        ]);
+                'max_age'   => $max_age,
+                'max_uses'  => $max_uses,
+                'temporary' => $temporary,
+                'xkcdpass'  => $xkcd,
+            ]
+        );
 
         $invite = new Invite((array) $request, true);
 
@@ -229,11 +238,11 @@ class Channel extends Part
      */
     public function getMessagesAttribute()
     {
-        if (! isset($this->attributes_cache['messages'])) {
-            $this->attributes_cache['messages'] = new Collection();
+        if (! Cache::get("channel.{$this->id}.messages")) {
+            Cache::set("channel.{$this->id}.messages", new Collection([], "channel.{$this->id}.messages"));
         }
 
-        return $this->attributes_cache['messages'];
+        return Cache::get("channel.{$this->id}.messages");
     }
 
     /**
@@ -268,8 +277,8 @@ class Channel extends Part
      */
     public function getInvitesAttribute()
     {
-        if (isset($this->attributes_cache['invites'])) {
-            return $this->attributes_cache['invites'];
+        if ($invites = Cache::get("channel.{$this->id}.invites")) {
+            return $invites;
         }
 
         $request = Guzzle::get($this->replaceWithVariables('channels/:id/invites'));
@@ -281,9 +290,9 @@ class Channel extends Part
             $invites[$index] = $invite;
         }
 
-        $invites = new Collection($invites);
+        $invites = new Collection($invites, "channel.{$this->id}.invites");
 
-        $this->attributes_cache['invites'] = $invites;
+        Cache::set("channel.{$this->id}.invites", $invites);
 
         return $invites;
     }
@@ -299,11 +308,15 @@ class Channel extends Part
             return $this->attributes_cache['overwrites'];
         }
 
+        if ($overwrites = Cache::get("channel.{$this->id}.overwrites")) {
+            return $overwrites;
+        }
+
         $overwrites = [];
 
         // Will return an empty collection when you don't have permission.
         if (is_null($this->attributes['permission_overwrites'])) {
-            return new Collection();
+            return new Collection([], "channel.{$this->id}.overwrites");
         }
 
         foreach ($this->attributes['permission_overwrites'] as $index => $data) {
@@ -312,9 +325,9 @@ class Channel extends Part
             $overwrites[$index] = new Overwrite($data, true);
         }
 
-        $overwrites = new Collection($overwrites);
+        $overwrites = new Collection($overwrites, "channel.{$this->id}.overwrites");
 
-        $this->attributes_cache['overwrites'] = $overwrites;
+        Cache::set("channel.{$this->id}.overwrites", $overwrites);
 
         return $overwrites;
     }
@@ -333,20 +346,23 @@ class Channel extends Part
             return false;
         }
 
-        $request = Guzzle::post("channels/{$this->id}/messages", [
-            'content' => $text,
-            'tts'     => $tts,
-        ]);
+        $request = Guzzle::post(
+            "channels/{$this->id}/messages",
+            [
+                'content' => $text,
+                'tts'     => $tts,
+            ]
+        );
 
         $message = new Message((array) $request, true);
 
         Cache::set("message.{$message->id}", $message);
 
-        if (! isset($this->attributes_cache['messages'])) {
-            $this->attributes_cache['messages'] = new Collection();
+        if (! Cache::has("channel.{$this->id}.messages")) {
+            $this->getMessagesAttribute();
         }
 
-        $this->attributes_cache['messages']->push($message);
+        $this->messages->push($message);
 
         return $message;
     }
@@ -356,12 +372,14 @@ class Channel extends Part
      *
      * @param string $filepath The path to the file to be sent.
      * @param string $filename The name to send the file as.
+     * @param string $content  Message content to send with the file.
+     * @param bool   $tts      Whether to send the message with TTS.
      *
      * @return Message|bool Either a Message if the request passed or false if it failed.
      *
      * @throws \Discord\Exceptions\FileNotFoundException Thrown when the file does not exist.
      */
-    public function sendFile($filepath, $filename)
+    public function sendFile($filepath, $filename, $content = null, $tts = false)
     {
         if ($this->type != self::TYPE_TEXT) {
             return false;
@@ -379,18 +397,36 @@ class Channel extends Part
             'authorization' => DISCORD_TOKEN,
         ];
 
-        $done     = false;
-        $finalRes = null;
+        $done      = false;
+        $finalRes  = null;
+        $multipart = [
+            [
+                'name'     => 'file',
+                'contents' => fopen($filepath, 'r'),
+                'filename' => $filename,
+            ],
+            [
+                'name'     => 'tts',
+                'contents' => ($tts ? 'true' : 'false'),
+            ],
+        ];
+
+        if (! is_null($content)) {
+            $multipart[] = [
+                'name'     => 'content',
+                'contents' => $content,
+            ];
+        }
 
         while (! $done) {
-            $response = $guzzle->request('post', $url, [
-                'headers'   => $headers,
-                'multipart' => [[
-                    'name'     => 'file',
-                    'contents' => fopen($filepath, 'r'),
-                    'filename' => $filename,
-                ]],
-            ]);
+            $response = $guzzle->request(
+                'post',
+                $url,
+                [
+                    'headers'   => $headers,
+                    'multipart' => $multipart,
+                ]
+            );
 
             // Rate limiting
             if ($response->getStatusCode() == 429) {
@@ -415,11 +451,11 @@ class Channel extends Part
 
         Cache::set("message.{$message->id}", $message);
 
-        if (! isset($this->attributes_cache['messages'])) {
-            $this->attributes_cache['messages'] = new Collection();
+        if (! Cache::has("channel.{$this->id}.messages")) {
+            $this->getMessagesAttribute();
         }
 
-        $this->attributes_cache['messages']->push($message);
+        $this->messages->push($message);
 
         return $message;
     }

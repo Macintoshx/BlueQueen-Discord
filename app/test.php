@@ -1,5 +1,5 @@
 <?php
-ini_set('memory_limit', '400M');
+ini_set('memory_limit', '200M');
 
 /*
  * This file is apart of the DiscordPHP project.

@@ -14,15 +14,16 @@ namespace Discord\Voice;
 use Discord\Exceptions\DCANotFoundException;
 use Discord\Exceptions\FFmpegNotFoundException;
 use Discord\Exceptions\FileNotFoundException;
-use Discord\Exceptions\OutdatedDCAException;
 use Discord\Exceptions\LibSodiumNotFoundException;
+use Discord\Exceptions\OutdatedDCAException;
 use Discord\Helpers\Collection;
 use Discord\Helpers\Process;
 use Discord\Parts\Channel\Channel;
-use Discord\WSClient\Factory as WsFactory;
-use Discord\WSClient\WebSocket as WS;
+use Discord\WebSockets\Op;
 use Discord\WebSockets\WebSocket;
 use Evenement\EventEmitter;
+use Ratchet\Client\Connector as WsFactory;
+use Ratchet\Client\WebSocket as WS;
 use Ratchet\WebSocket\Version\RFC6455\Frame;
 use React\Datagram\Factory as DatagramFactory;
 use React\Datagram\Socket;
@@ -167,14 +168,7 @@ class VoiceClient extends EventEmitter
      *
      * @var string The voice mode.
      */
-    protected $mode = 'plain';
-
-    /**
-     * Whether we are encrypting the voice data.
-     *
-     * @var bool Encrypting the voice data.
-     */
-    protected $encrypted = false;
+    protected $mode = 'xsalsa20_poly1305';
 
     /**
      * The secret key used for encrypting voice.
@@ -291,6 +285,13 @@ class VoiceClient extends EventEmitter
     protected $bitrate = 64000;
 
     /**
+     * Is the voice client reconnecting?
+     *
+     * @var bool Whether the voice client is reconnecting.
+     */
+    protected $reconnecting = false;
+
+    /**
      * Constructs the Voice Client instance.
      *
      * @param WebSocket     $websocket The main WebSocket client.
@@ -302,6 +303,7 @@ class VoiceClient extends EventEmitter
      */
     public function __construct(WebSocket $websocket, LoopInterface &$loop, Channel $channel, $data)
     {
+        $this->loop           = $loop;
         $this->mainWebsocket  = $websocket;
         $this->channel        = $channel;
         $this->data           = $data;
@@ -312,8 +314,7 @@ class VoiceClient extends EventEmitter
 
         $this->checkForFFmpeg();
         $this->checkForDCA();
-
-        $this->loop = $this->initSockets($loop);
+        $this->initSockets();
     }
 
     /**
@@ -321,186 +322,248 @@ class VoiceClient extends EventEmitter
      *
      * @return void
      */
-    public function initSockets($loop)
+    public function initSockets()
     {
-        $wsfac    = new WsFactory($loop);
-        $resolver = (new DNSFactory())->createCached('8.8.8.8', $loop);
-        $udpfac   = new DatagramFactory($loop, $resolver);
+        $wsfac = new WsFactory($this->loop);
 
-        $wsfac->createCOnnection("wss://{$this->endpoint}")->then(function (WS $ws) use ($udpfac, &$loop) {
-            $this->voiceWebsocket = $ws;
+        $wsfac("wss://{$this->endpoint}")->then(
+            [$this, 'handleWebSocketConnection'],
+            [$this, 'handleWebSocketError']
+        );
+    }
 
-            $firstPack = true;
-            $ip = $port = '';
+    /**
+     * Handles a WebSocket connection.
+     *
+     * @param WS $ws The WebSocket instance.
+     *
+     * @return void
+     */
+    public function handleWebSocketConnection(WS $ws)
+    {
+        $resolver = (new DNSFactory())->createCached('8.8.8.8', $this->loop);
+        $udpfac   = new DatagramFactory($this->loop, $resolver);
 
-            $discoverUdp = function ($message) use (&$ws, &$discoverUdp, $udpfac, &$firstPack, &$ip, &$port, &$loop) {
-                $data = json_decode($message);
+        $this->voiceWebsocket = $ws;
 
-                if ($data->op == 2) {
-                    $ws->removeListener('message', $discoverUdp);
+        $firstPack = true;
+        $ip        = $port        = '';
 
-                    $this->udpPort = $data->d->port;
-                    $this->heartbeat_interval = $data->d->heartbeat_interval;
-                    $this->ssrc = $data->d->ssrc;
+        $discoverUdp = function ($message) use (&$ws, &$discoverUdp, $udpfac, &$firstPack, &$ip, &$port) {
+            $data = json_decode($message->getPayload());
 
+            if ($data->op == Op::VOICE_READY) {
+                $ws->removeListener('message', $discoverUdp);
+
+                $this->udpPort            = $data->d->port;
+                $this->heartbeat_interval = $data->d->heartbeat_interval;
+                $this->ssrc               = $data->d->ssrc;
+
+                $this->send([
+                    'op' => Op::VOICE_HEARTBEAT,
+                    'd'  => microtime(true),
+                ]);
+                $this->emit('ws-heartbeat', []);
+
+                $this->heartbeat = $this->loop->addPeriodicTimer($this->heartbeat_interval / 1000, function () {
                     $this->send([
-                        'op' => 3,
+                        'op' => Op::VOICE_HEARTBEAT,
                         'd'  => microtime(true),
                     ]);
                     $this->emit('ws-heartbeat', []);
+                });
 
-                    $this->heartbeat = $loop->addPeriodicTimer($this->heartbeat_interval / 1000, function () {
-                        $this->send([
-                            'op' => 3,
-                            'd'  => microtime(true),
-                        ]);
-                        $this->emit('ws-heartbeat', []);
+                $buffer = new Buffer(70);
+                $buffer->writeUInt32BE($this->ssrc, 3);
+
+                $udpfac->createClient("{$this->endpoint}:{$this->udpPort}")->then(function (Socket $client) use (&$ws, &$firstPack, &$ip, &$port, $buffer) {
+                    $this->client = $client;
+
+                    $this->loop->addTimer(0.1, function () use (&$client, $buffer) {
+                        $client->send((string) $buffer);
                     });
 
-                    $buffer = new Buffer(70);
-                    $buffer->writeUInt32BE($this->ssrc, 3);
+                    $this->udpHeartbeat = $this->loop->addPeriodicTimer(5, function () use ($client) {
+                        $buffer = new Buffer(9);
+                        $buffer[0] = pack('c', 0xC9);
+                        $buffer->writeUInt64LE($this->heartbeatSeq, 1);
+                        ++$this->heartbeatSeq;
 
-                    $udpfac->createClient("{$this->endpoint}:{$this->udpPort}")->then(function (Socket $client) use (&$ws, &$firstPack, &$ip, &$port, $buffer, &$loop) {
-                        $this->client = $client;
+                        $client->send((string) $buffer);
+                        $this->emit('udp-heartbeat', []);
+                    });
 
-                        $loop->addTimer(0.1, function () use (&$client, $buffer) {
-                            $client->send((string) $buffer);
-                        });
+                    $client->on('error', function ($e) {
+                        $this->emit('udp-error', [$e]);
+                    });
 
-                        $this->udpHeartbeat = $loop->addPeriodicTimer(5, function () use ($client) {
-                            $buffer = new Buffer(9);
-                            $buffer[0] = pack('c', 0xC9);
-                            $buffer->writeUInt64LE($this->heartbeatSeq, 1);
-                            ++$this->heartbeatSeq;
+                    $decodeUDP = function ($message) use (&$decodeUDP, $client, &$ip, &$port) {
+                        $message = (string) $message;
+                        // let's get our IP
+                        $ip_start = 4;
+                        $ip = substr($message, $ip_start);
+                        $ip_end = strpos($ip, "\x00");
+                        $ip = substr($ip, 0, $ip_end);
 
-                            $client->send((string) $buffer);
-                            $this->emit('udp-heartbeat', []);
-                        });
+                        // now the port!
+                        $port = substr($message, strlen($message) - 2);
+                        $port = unpack('v', $port)[1];
 
-                        $client->on('error', function ($e) {
-                            $this->emit('udp-error', [$e]);
-                        });
+                        if (! function_exists('\Sodium\crypto_secretbox')) {
+                            $this->emit('error', [new LibSodiumNotFoundException('libsodium-php could not be found.')]);
+                            $this->client->close();
+                            $this->voiceWebsocket->close();
 
-                        $decodeUDP = function ($message) use (&$decodeUDP, $client, &$ip, &$port) {
-                            $message = (string) $message;
-                            // let's get our IP
-                            $ip_start = 4;
-                            $ip = substr($message, $ip_start);
-                            $ip_end = strpos($ip, "\x00");
-                            $ip = substr($ip, 0, $ip_end);
-
-                            // now the port!
-                            $port = substr($message, strlen($message) - 2);
-                            $port = unpack('v', $port)[1];
-
-                            if (! function_exists('\Sodium\crypto_secretbox')) {
-                                $this->emit('error', [new LibSodiumNotFoundException('libsodium-php was not found.')]);
-
-                                $this->client->close();
-                                $this->voiceWebsocket->close();
-                                $this->mainWebsocket->send([
-                                    'op' => 4,
-                                    'd'  => [
-                                        'guild_id'   => null,
-                                        'channel_id' => null,
-                                        'self_mute'  => false,
-                                        'self_deaf'  => false,
-                                    ],
-                                ]);
-
-                                return;
-                            } else {
-                                $this->mode = 'xsalsa20_poly1305'; // voice encryption!
-                                $this->encrypted = true;
-                            }
-
-                            $payload = [
-                                'op' => 1,
+                            $this->mainWebsocket->send([
+                                'op' => Op::OP_VOICE_STATE_UPDATE,
                                 'd'  => [
-                                    'protocol' => 'udp',
-                                    'data'     => [
-                                        'address' => $ip,
-                                        'port'    => (int) $port,
-                                        'mode'    => $this->mode,
-                                    ],
+                                    'guild_id'   => $this->channel->guild_id,
+                                    'channel_id' => null,
+                                    'self_mute'  => true,
+                                    'self_deaf'  => true,
                                 ],
-                            ];
+                            ]);
 
-                            $this->send($payload);
-
-                            $client->removeListener('message', $decodeUDP);
-                            // disabled for now
-                            $client->on('message', [$this, 'handleAudioData']);
-                        };
-
-                        $client->on('message', $decodeUDP);
-                    }, function ($e) {
-                        $this->emit('error', [$e]);
-                    });
-                }
-            };
-
-            $ws->on('message', $discoverUdp);
-            $ws->on('message', function ($message) {
-                $data = json_decode($message);
-
-                $this->emit('ws-message', [$message, $this]);
-
-                switch ($data->op) {
-                    case 3: // keepalive response
-                        $end = microtime(true);
-                        $start = $data->d;
-                        $diff = ($end - $start) * 1000;
-
-                        if ($diff <= 10) { // set to 20ms
-                            $this->setFrameSize(20);
-                        } elseif ($diff <= 20) { // set to 40ms
-                            $this->setFrameSize(40);
-                        } else { // set to 60ms
-                            $this->setFrameSize(60);
+                            return;
                         }
 
-                        $this->emit('ws-ping', [$diff]);
-                        break;
-                    case 4: // ready
-                        $this->ready = true;
-                        $this->mode = $data->d->mode;
+                        $payload = [
+                            'op' => Op::VOICE_SELECT_PROTO,
+                            'd'  => [
+                                'protocol' => 'udp',
+                                'data'     => [
+                                    'address' => $ip,
+                                    'port'    => (int) $port,
+                                    'mode'    => $this->mode,
+                                ],
+                            ],
+                        ];
 
-                        foreach ($data->d->secret_key as $part) {
-                            $this->secret_key .= pack('C*', $part);
-                        }
+                        $this->send($payload);
 
-                        $this->emit('ready', [$this]);
-                        break;
-                    case 5: // user started speaking
-                        $this->emit('speaking', [$data->d->speaking, $data->d->user_id, $this]);
-                        $this->emit("speaking.{$data->d->user_id}", [$data->d->speaking, $this]);
-                        $this->speakingStatus[$data->d->ssrc] = $data->d;
-                        break;
-                }
-            });
+                        $client->removeListener('message', $decodeUDP);
+                        // disabled for now
+                        $client->on('message', [$this, 'handleAudioData']);
+                    };
 
-            $ws->on('error', function ($e) {
-                $this->emit('ws-error', [$e]);
-            });
-
-            if (! $this->sentLoginFrame) {
-                $this->send([
-                    'op' => 0,
-                    'd'  => [
-                        'server_id'  => $this->channel->guild_id,
-                        'user_id'    => $this->data['user_id'],
-                        'session_id' => $this->data['session'],
-                        'token'      => $this->data['token'],
-                    ],
-                ]);
-                $this->sentLoginFrame = true;
+                    $client->on('message', $decodeUDP);
+                }, function ($e) {
+                    $this->emit('error', [$e]);
+                });
             }
-        }, function ($e) {
-            $this->emit('error', [$e]);
+        };
+
+        $ws->on('message', $discoverUdp);
+        $ws->on('message', function ($message) {
+            $data = json_decode($message->getPayload());
+
+            $this->emit('ws-message', [$message, $this]);
+
+            switch ($data->op) {
+                case Op::VOICE_HEARTBEAT: // keepalive response
+                    $end = microtime(true);
+                    $start = $data->d;
+                    $diff = ($end - $start) * 1000;
+
+                    if ($diff <= 10) { // set to 20ms
+                        $this->setFrameSize(20);
+                    } elseif ($diff <= 20) { // set to 40ms
+                        $this->setFrameSize(40);
+                    } else { // set to 60ms
+                        $this->setFrameSize(60);
+                    }
+
+                    $this->emit('ws-ping', [$diff]);
+                    break;
+                case Op::VOICE_DESCRIPTION: // ready
+                    $this->ready = true;
+                    $this->mode = $data->d->mode;
+                    $this->secret_key = '';
+
+                    foreach ($data->d->secret_key as $part) {
+                        $this->secret_key .= pack('C*', $part);
+                    }
+
+                    if (! $this->reconnecting) {
+                        $this->emit('ready', [$this]);
+                    } else {
+                        $this->reconnecting = false;
+                        $this->emit('resumed', [$this]);
+                    }
+
+                    break;
+                case Op::VOICE_SPEAKING: // user started speaking
+                    $this->emit('speaking', [$data->d->speaking, $data->d->user_id, $this]);
+                    $this->emit("speaking.{$data->d->user_id}", [$data->d->speaking, $this]);
+                    $this->speakingStatus[$data->d->ssrc] = $data->d;
+                    break;
+            }
         });
 
-        return $loop;
+        $ws->on('error', function ($e) {
+            $this->emit('ws-error', [$e]);
+        });
+
+        $ws->on('close', function ($op, $reason) {
+            $this->emit('ws-close', [$op, $reason, $this]);
+        });
+
+        if (! $this->sentLoginFrame) {
+            $this->send([
+                'op' => Op::VOICE_IDENTIFY,
+                'd'  => [
+                    'server_id'  => $this->channel->guild_id,
+                    'user_id'    => $this->data['user_id'],
+                    'session_id' => $this->data['session'],
+                    'token'      => $this->data['token'],
+                ],
+            ]);
+            $this->sentLoginFrame = true;
+        }
+    }
+
+    /**
+     * Handles a WebSocket error.
+     *
+     * @param \Exception $e The error.
+     *
+     * @return void
+     */
+    public function handleWebSocketError($e)
+    {
+        $this->emit('error', [$e]);
+    }
+
+    /**
+     * Handles a voice server change.
+     *
+     * @param array $data New voice server information.
+     *
+     * @return void
+     */
+    public function handleVoiceServerChange(array $data = [])
+    {
+        $this->reconnecting   = true;
+        $this->sentLoginFrame = false;
+        $this->pause();
+
+        $this->client->close();
+        $this->voiceWebsocket->close();
+
+        $this->loop->cancelTimer($this->heartbeat);
+        $this->loop->cancelTimer($this->udpHeartbeat);
+
+        $this->data['token'] = $data['token']; // set the token if it changed
+        $this->endpoint      = str_replace([':80', ':443'], '', $data['endpoint']);
+
+        $this->initSockets();
+
+        $this->on('resumed', function () {
+            $this->unpause()->then(function () {
+                $this->speaking = false;
+                $this->setSpeaking(true);
+            });
+        });
     }
 
     /**
@@ -532,15 +595,7 @@ class VoiceClient extends EventEmitter
         $process = $this->dcaEncode($file, $channels);
         $process->start($this->loop);
 
-        $this->playDCAStream($process)->then(function ($result) use ($deferred) {
-            $deferred->resolve($result);
-        }, function ($e) use ($deferred) {
-            $deferred->reject($e);
-        }, function ($meta) use ($deferred) {
-            $deferred->notify($meta);
-        });
-
-        return $deferred->promise();
+        return $this->playDCAStream($process);
     }
 
     /**
@@ -578,17 +633,7 @@ class VoiceClient extends EventEmitter
 
         $stream->pipe($process->stdin);
 
-        $this->playDCAStream($process)->then(function ($result) use ($deferred, $stream) {
-            $stream->close();
-            $deferred->resolve($result);
-        }, function ($e) use ($deferred, $stream) {
-            $stream->close();
-            $deferred->reject($e);
-        }, function ($meta) use ($deferred) {
-            $deferred->notify($meta);
-        });
-
-        return $deferred->promise();
+        return $this->playDCAStream($process);
     }
 
     /**
@@ -647,10 +692,8 @@ class VoiceClient extends EventEmitter
             }
 
             if ($this->stopAudio) {
-                $this->stopAudio = false;
-                fclose($stream);
-
                 $this->setSpeaking(false);
+                fclose($stream);
 
                 $this->seq        = 0;
                 $this->timestamp  = 0;
@@ -661,6 +704,7 @@ class VoiceClient extends EventEmitter
                     $process->close();
                 }
 
+                $this->stopAudio = false;
                 $deferred->resolve(true);
 
                 return;
@@ -694,10 +738,6 @@ class VoiceClient extends EventEmitter
             $opusLength = unpack('v', $header);
             $opusLength = reset($opusLength);
             $buffer     = fread($stream, $opusLength);
-
-            if (! $this->speaking) {
-                $this->setSpeaking(true);
-            }
 
             if (strlen($buffer) !== $opusLength) {
                 $newbuff = new Buffer($opusLength);
@@ -797,7 +837,7 @@ class VoiceClient extends EventEmitter
             return;
         }
 
-        $packet = new VoicePacket($data, $this->ssrc, $this->seq, $this->timestamp, $this->encrypted, $this->secret_key);
+        $packet = new VoicePacket($data, $this->ssrc, $this->seq, $this->timestamp, true, $this->secret_key);
         $this->client->send((string) $packet);
 
         $this->streamTime = microtime(true);
@@ -829,7 +869,7 @@ class VoiceClient extends EventEmitter
         }
 
         $this->send([
-            'op' => 5,
+            'op' => Op::VOICE_SPEAKING,
             'd'  => [
                 'speaking' => $speaking,
                 'delay'    => 0,
@@ -861,7 +901,7 @@ class VoiceClient extends EventEmitter
         }
 
         $this->mainWebsocket->send([
-            'op' => 4,
+            'op' => Op::OP_VOICE_STATE_UPDATE,
             'd'  => [
                 'guild_id'   => $channel->guild_id,
                 'channel_id' => $channel->id,
@@ -1015,8 +1055,8 @@ class VoiceClient extends EventEmitter
      */
     public function send(array $data)
     {
-        $frame = new Frame(json_encode($data), true);
-        $this->voiceWebsocket->send($frame);
+        $json = json_encode($data);
+        $this->voiceWebsocket->send($json);
     }
 
     /**
@@ -1041,7 +1081,7 @@ class VoiceClient extends EventEmitter
         $this->deaf = $deaf;
 
         $this->mainWebsocket->send([
-            'op' => 4,
+            'op' => Op::OP_VOICE_STATE_UPDATE,
             'd'  => [
                 'guild_id'   => $this->channel->guild_id,
                 'channel_id' => $this->channel->id,
@@ -1091,7 +1131,8 @@ class VoiceClient extends EventEmitter
             return $deferred->promise();
         }
 
-        $this->isPaused = false;
+        $this->isPaused  = false;
+        $this->timestamp = microtime(true) * 1000;
         $deferred->resolve();
 
         return $deferred->promise();
@@ -1126,11 +1167,11 @@ class VoiceClient extends EventEmitter
     }
 
     /**
-     * Leaves the voice channel.
+     * Closes the voice client.
      *
      * @return \React\Promise\Promise
      */
-    public function leave()
+    public function close()
     {
         $deferred = new Deferred();
 
@@ -1140,22 +1181,22 @@ class VoiceClient extends EventEmitter
             return $deferred->promise();
         }
 
-        $this->stop();
-        $this->setSpeaking(false);
+        // $this->stop();
+        // $this->setSpeaking(false);
         $this->ready = false;
 
         $this->mainWebsocket->send([
-            'op' => 4,
+            'op' => Op::OP_VOICE_STATE_UPDATE,
             'd'  => [
-                'guild_id'   => null,
+                'guild_id'   => $this->channel->guild_id,
                 'channel_id' => null,
-                'self_mute'  => false,
-                'self_deaf'  => false,
+                'self_mute'  => true,
+                'self_deaf'  => true,
             ],
         ]);
 
-        $this->voiceWebsocket->close();
         $this->client->close();
+        $this->voiceWebsocket->close();
 
         $this->heartbeat_interval = null;
         $this->loop->cancelTimer($this->heartbeat);
@@ -1168,6 +1209,8 @@ class VoiceClient extends EventEmitter
         $this->startTime      = null;
         $this->streamTime     = 0;
         $this->speakingStatus = new Collection();
+
+        $this->emit('close');
 
         $deferred->resolve();
 
@@ -1270,23 +1313,19 @@ class VoiceClient extends EventEmitter
      */
     protected function handleAudioData($message)
     {
-        if ($this->encrypted) {
-            $voicePacket = VoicePacket::make($message);
-            $nonce       = new Buffer(24);
-            $nonce->write($voicePacket->getHeader(), 0);
-            $message = \Sodium\crypto_secretbox_open($voicePacket->getData(), (string) $nonce, $this->secret_key);
+        $voicePacket = VoicePacket::make($message);
+        $nonce       = new Buffer(24);
+        $nonce->write($voicePacket->getHeader(), 0);
+        $message = \Sodium\crypto_secretbox_open($voicePacket->getData(), (string) $nonce, $this->secret_key);
 
-            if ($message === false) {
-                // if we can't decode the message, drop it silently.
-                return;
-            }
+        if ($message === false) {
+            // if we can't decode the message, drop it silently.
+            return;
         }
 
         $this->emit('raw', [$message, $this]);
 
-        return; // temp break until dca has decoding support
-
-        $vp      = VoicePacket::make($message);
+        $vp      = VoicePacket::make($voicePacket->getHeader().$message);
         $ss      = $this->speakingStatus->get('ssrc', $vp->getSSRC());
         $decoder = @$this->voiceDecoders[$vp->getSSRC()];
 
@@ -1299,6 +1338,14 @@ class VoiceClient extends EventEmitter
             // make a decoder
             if (! isset($this->recieveStreams[$ss->ssrc])) {
                 $this->recieveStreams[$ss->ssrc] = new RecieveStream();
+
+                $this->recieveStreams[$ss->ssrc]->on('pcm', function ($d) {
+                    $this->emit('channel-pcm', [$d, $this]);
+                });
+
+                $this->recieveStreams[$ss->ssrc]->on('opus', function ($d) {
+                    $this->emit('channel-opus', [$d, $this]);
+                });
             }
 
             $createDecoder = function () use (&$createDecoder, $ss) {
@@ -1324,6 +1371,7 @@ class VoiceClient extends EventEmitter
             };
 
             $createDecoder();
+            $decoder = @$this->voiceDecoders[$vp->getSSRC()];
         }
 
         $buff = new Buffer(strlen($vp->getData()) + 2);
@@ -1415,9 +1463,9 @@ class VoiceClient extends EventEmitter
      */
     public function dcaEncode($filename = '', $channels = 2)
     {
-        if (! empty($filename) && ! file_exists($filename)) {
-            return;
-        }
+        // if (! empty($filename) && ! file_exists($filename)) {
+        //     return;
+        // }
 
         $flags = [
              '-ac', $channels, // Channels
@@ -1457,5 +1505,15 @@ class VoiceClient extends EventEmitter
         $flags = implode(' ', $flags);
 
         return new Process("{$this->dca} {$flags}");
+    }
+
+    /**
+     * Returns the connected channel.
+     *
+     * @return Channel The connected channel.
+     */
+    public function getChannel()
+    {
+        return $this->channel;
     }
 }

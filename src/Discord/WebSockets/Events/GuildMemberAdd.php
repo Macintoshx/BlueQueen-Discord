@@ -40,8 +40,7 @@ class GuildMemberAdd extends Event
         foreach ($discord->guilds as $index => $guild) {
             if ($guild->id == $data->guild_id) {
                 $guild->members->push($data);
-
-                $discord->guilds[$index] = $guild;
+                ++$guild->member_count;
 
                 break;
             }

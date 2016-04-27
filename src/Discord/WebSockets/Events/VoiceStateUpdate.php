@@ -11,10 +11,8 @@
 
 namespace Discord\WebSockets\Events;
 
-use Discord\Cache\Cache;
-use Discord\Helpers\Collection;
-use Discord\Parts\WebSockets\VoiceStateUpdate as VoiceStateUpdatePart;
 use Discord\WebSockets\Event;
+use Discord\Parts\WebSockets\VoiceStateUpdate as VoiceStateUpdatePart;
 
 /**
  * Event that is emitted wheh `VOICE_STATE_UPDATE` is fired.
@@ -24,7 +22,7 @@ class VoiceStateUpdate extends Event
     /**
      * {@inheritdoc}
      *
-     * @return array The data.
+     * @return VoiceStateUpdatePart The voice state.
      */
     public function getData($data, $discord)
     {
@@ -36,31 +34,40 @@ class VoiceStateUpdate extends Event
      */
     public function updateDiscordInstance($data, $discord)
     {
+        /*
+        VOICE_STATE_UPDATE
+
+        Cases:
+        - User switches from guild A channel 1 to guild A channel 2
+            - Remove the state from guild A channel 1
+            - Add the state to guild A channel 2
+        - User switches from guild A channel 1 to guild B channel 1
+            - User is a bot:
+                - Add the state to guild B channel 1
+            - User is not a bot:
+                - Remove the state from guild A channel 1
+                - Add the state to guild B channel 1
+        - User leaves guild A channel 1
+            - Remove the state from guild A channel 1
+         */
+
         foreach ($discord->guilds as $index => $guild) {
             if ($guild->id == $data->guild_id) {
-                foreach ($guild->members as $mindex => $member) {
-                    if ($member->id == $data->user_id) {
-                        $member->deaf = $data->deaf;
-                        $member->mute = $data->mute;
+                foreach ($guild->channels as $cindex => $channel) {
+                    if (isset($channel->members[$data->user_id])) {
+                        unset($channel->members[$data->user_id]);
+                    }
 
-                        $guild->members[$mindex] = $member;
-
-                        break;
+                    if ($channel->id == $data->channel_id) {
+                        $channel->members[$data->user_id] = $data;
                     }
                 }
-
-                if (Cache::has("channels.{$data->channel_id}.voice.members")) {
-                    $collection = Cache::get("channels.{$data->channel_id}.voice.members");
-                } else {
-                    $collection = new Collection();
+            } else {
+                foreach ($guild->channels as $cindex => $channel) {
+                    if (isset($channel->members[$data->user_id]) && ! $discord->bot) {
+                        unset($channel->members[$data->user_id]);
+                    }
                 }
-
-                $collection[$data->user_id] = $data;
-                Cache::set("channels.{$data->channel_id}.voice.members", $collection);
-
-                $discord->guilds[$index] = $guild;
-
-                break;
             }
         }
 

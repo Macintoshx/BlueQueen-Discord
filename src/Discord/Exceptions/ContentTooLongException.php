@@ -11,10 +11,11 @@
 
 namespace Discord\Exceptions;
 
+use Discord\Exceptions\Rest\ContentTooLongException as Base;
+
 /**
- * Thrown when the Discord servers return `content longer than 2000 characters` after
- * a REST request. The user must use WebSockets to obtain this data if they need it.
+ * {@inheritdoc}
  */
-class ContentTooLongException extends \Exception
+class ContentTooLongException extends Base
 {
 }
