@@ -32,7 +32,8 @@ $ws->on(
         //
         // We will echo to the console that the WebSocket is ready.
         echo 'Discord WebSocket is ready!'.PHP_EOL;
-
+	    $discord->getClient()->updatePresence($ws, "Illuminati", false);
+	    echo 'Game set'.PHP_EOL;
         // Here we will just log all messages.
         $ws->on(
             Event::MESSAGE_CREATE,
