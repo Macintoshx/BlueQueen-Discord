@@ -49,7 +49,7 @@ $ws->on(
 
 	            if($message->content == '!bot')
 	            {
-		            $message->reply("\nBlueQueen Discord Bot v.0.1\n\nDostepne komendy: \n\nping,!pogoda,!bot");
+		            $message->reply("\nBlueQueen Discord Bot v.0.1\n\nDostepne komendy: \n\nping, !pogoda, !bot");
 	            }
 
                 $reply = $message->timestamp->format('d/m/y H:i:s').' - '; // Format the message timestamp.
