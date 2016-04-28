@@ -14,7 +14,7 @@ use Discord\WebSockets\Event;
 use Discord\WebSockets\WebSocket;
 
 // Includes the Composer autoload file
-require_once '../../bqbot.php';
+require_once dirname(__FILE__) . '/../../bqbot.php';
 include __DIR__.'/../vendor/autoload.php';
 
 // Init the Discord instance.
