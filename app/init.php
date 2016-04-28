@@ -1,14 +1,13 @@
 <?php
 ini_set('memory_limit', '200M');
 
-/*
- * This file is apart of the DiscordPHP project.
- *
- * Copyright (c) 2016 David Cole <david@team-reflex.com>
- *
- * This source file is subject to the MIT license that is bundled
- * with this source code in the LICENSE.md file.
- */
+$bqbot = [
+	'appClientId',
+	'appClientSecret',
+	'botUsername',
+	'botSecret',
+	'botToken'
+]; // nazwy zmiennych z hasłami itd.
 
 use Discord\Discord;
 use Discord\WebSockets\Event;
@@ -23,11 +22,6 @@ $discord = new Discord($botToken);
 // Init the WebSocket instance.
 $ws = new WebSocket($discord);
 
-// We use EventEmitters to emit events. They are pretty much
-// identical to the JavaScript/NodeJS implementation.
-//
-// Here we are waiting for the WebSocket client to parse the READY frame. Once
-// it has done that it will run the code in the closure.
 $ws->on(
     'ready',
     function ($discord) use ($ws) {
@@ -74,14 +68,6 @@ $ws->on(
 );
 
 // Now we will run the ReactPHP Event Loop!
-while(true)
-{
-	try{
-		$ws->run();
-	}
-	catch(Exception $e)
-	{
-		echo "Error occured - restart";
-	}
 
-}
+$ws->run();
+
