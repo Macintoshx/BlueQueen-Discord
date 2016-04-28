@@ -1,14 +1,6 @@
 <?php
 ini_set('memory_limit', '200M');
 
-$bqbot = [
-	'appClientId',
-	'appClientSecret',
-	'botUsername',
-	'botSecret',
-	'botToken'
-]; // nazwy zmiennych z hasłami itd.
-
 use Discord\Discord;
 use Discord\WebSockets\Event;
 use Discord\WebSockets\WebSocket;
@@ -16,6 +8,14 @@ use Discord\WebSockets\WebSocket;
 // Includes the Composer autoload file
 require_once dirname(__FILE__) . '/../../bqbot.php';
 include __DIR__.'/../vendor/autoload.php';
+
+$bqbot = [
+	'appClientId',
+	'appClientSecret',
+	'botUsername',
+	'botSecret',
+	'botToken'
+]; // nazwy zmiennych z hasłami itd.
 
 // Init the Discord instance.
 $discord = new Discord($botToken);
@@ -33,7 +33,6 @@ $ws->on(
         // We will echo to the console that the WebSocket is ready.
         echo 'Discord WebSocket is ready!'.PHP_EOL;
 
-
         // Here we will just log all messages.
         $ws->on(
             Event::MESSAGE_CREATE,
@@ -46,6 +45,11 @@ $ws->on(
 	            if($message->content == '!pogoda')
 	            {
 		            $message->reply('funkcja jeszcze nie dostepna');
+	            }
+
+	            if($message->content == '!bot')
+	            {
+		            $message->reply('BlueQueen Discord Bot v.0.1\nDostepne komendy: \nping,!pogoda,!bot');
 	            }
 
                 $reply = $message->timestamp->format('d/m/y H:i:s').' - '; // Format the message timestamp.
