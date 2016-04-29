@@ -61,7 +61,7 @@ $ws->on(
 					curl_close($ch);
 
 					$response = json_decode($response);
-					$resp = "\nWejherowo : [" . $response[0]->Date . "] : " . $response[0]->Value;
+					$resp = "\n[" . $response[0]->Date . "] Wejherowo : " . $response[0]->Value . "°C";
 					$message->reply($resp);
 				}
 
