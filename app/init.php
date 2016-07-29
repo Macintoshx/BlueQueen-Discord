@@ -18,7 +18,7 @@ $bqbot = [
 ]; // nazwy zmiennych z hasłami itd.
 
 $discord = new Discord([
-	'token' => 'bot-token',
+	'token' => $botToken,
 ]);
 
 $discord->on('ready', function ($discord) {
