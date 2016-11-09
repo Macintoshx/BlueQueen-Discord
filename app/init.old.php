@@ -18,7 +18,9 @@ $bqbot = [
 ]; // nazwy zmiennych z hasłami itd.
 
 // Init the Discord instance.
-$discord = new Discord($botToken);
+$discord = new \Discord\Discord([
+    'token' => "$botToken",
+]);
 // Init the WebSocket instance.
 $ws = new WebSocket($discord);
 
