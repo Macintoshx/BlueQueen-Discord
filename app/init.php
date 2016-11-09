@@ -16,11 +16,10 @@ $bqbot = [
 ]; // nazwy zmiennych z hasłami itd.
 
 
+
 $discord = new \Discord\Discord([
     'token' => "$botToken",
 ]);
-
-
 
 $discord->on('ready', function ($discord) {
     /** @var $discord \Discord\Discord */
@@ -36,6 +35,7 @@ $discord->on('ready', function ($discord) {
         echo "There was an error joining the voice channel: {$e->getMessage()}\r\n";
     });
     echo "Bot is ready.", PHP_EOL;
+
 
     // Listen for events here
     $discord->on('message', function ($message) {
@@ -71,12 +71,6 @@ $discord->on('ready', function ($discord) {
         if ($message->content == '!bot') {
             $message->reply("\nBlueQueen Discord Bot v.0.2\n\nDostepne komendy: \n\nping, !pogoda, !bot");
         }
-
-        $reply = $message->timestamp->format('d/m/y H:i:s') . ' - '; // Format the message timestamp.
-        $reply .= $message->channel->name . ' - ';
-        $reply .= $message->author->username . ' - '; // Add the message author's username onto the string.
-        $reply .= $message->content; // Add the message content.
-        echo $reply . PHP_EOL; // Finally, echo the message with a PHP end of line.
     });
 });
 
