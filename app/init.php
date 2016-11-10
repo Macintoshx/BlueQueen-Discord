@@ -20,30 +20,33 @@ $bqbot = [
 $discord = new \Discord\Discord([
     'token' => "$botToken",
 ]);
-
+static $svc;
 $discord->on('ready', function ($discord) {
     /** @var $discord \Discord\Discord */
     $game = $discord->factory(\Discord\Parts\User\Game::class, ['name' => 'with Sad Panda', 'type' => 0]);
     $discord->updatePresence($game, false);
-    $guild   = $discord->guilds->first();
-    $channel = $guild->channels->get('name', 'Main');
-    /** @var $channel Channel */
-    $discord->joinVoiceChannel($channel)->then(function (VoiceClient $vc) {
-        echo "Joined voice channel.\r\n";
-        $vc->playFile('sounds/hohoho.mp3');
-    }, function ($e) {
-        echo "There was an error joining the voice channel: {$e->getMessage()}\r\n";
-    });
     echo "Bot is ready.", PHP_EOL;
 
 
     // Listen for events here
-    $discord->on('message', function ($message) {
+    $discord->on('message', function ($message, $discord) {
+        /** @var $discord \Discord\Discord */
         /** @var $message \Discord\Parts\Channel\Message */
         echo "Recieved a message from {$message->author->username}: {$message->content}", PHP_EOL;
         // We are just checking if the message equils to ping and replying to the user with a pong!
         if ($message->content == 'hohoho') {
-
+            $guild   = $discord->guilds->first();
+            $channel = $guild->channels->get('name', 'Nauka 1');
+            /** @var $channel Channel */
+            $discord->joinVoiceChannel($channel)->then(function (VoiceClient $vc) {
+                echo "Joined voice channel.\r\n";
+                $vc->playFile('/var/www/bot.bluequeen.tk/app/sounds/hohoho.mp3');
+            }, function ($e) {
+                echo "There was an error joining the voice channel: {$e->getMessage()}\r\n";
+            })->otherwise(function (VoiceClient $vc) {
+                echo "Joined voice channel.\r\n";
+                $vc->playFile('/var/www/bot.bluequeen.tk/app/sounds/hohoho.mp3');
+            });
         }
 
         if ($message->content == '!pogoda') {
@@ -71,6 +74,12 @@ $discord->on('ready', function ($discord) {
         if ($message->content == '!bot') {
             $message->reply("\nBlueQueen Discord Bot v.0.2\n\nDostepne komendy: \n\nping, !pogoda, !bot");
         }
+
+        $reply = $message->timestamp->format('d/m/y H:i:s') . ' - '; // Format the message timestamp.
+        $reply .= $message->channel->name . ' - ';
+        $reply .= $message->author->username . ' - '; // Add the message author's username onto the string.
+        $reply .= $message->content; // Add the message content.
+        echo $reply . PHP_EOL; // Finally, echo the message with a PHP end of line.
     });
 });
 
